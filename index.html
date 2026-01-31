@@ -40,6 +40,16 @@
             100% { background-position: 1000px 0; }
         }
         
+        /* Bottle Spin Animation */
+        @keyframes spin-bottle {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(1800deg); }
+        }
+        
+        .bottle-spinning {
+            animation: spin-bottle 3s cubic-bezier(0.17, 0.67, 0.35, 0.99) forwards;
+        }
+        
         .fade-in-up { animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         .float-animation { animation: float 3s ease-in-out infinite; }
         .pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
@@ -148,6 +158,81 @@
                 opacity: 0;
             }
         }
+
+        /* Video Call Styles */
+        .video-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #1a1a1a;
+            border-radius: 1rem;
+            overflow: hidden;
+        }
+
+        .video-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .video-pip {
+            position: absolute;
+            bottom: 1rem;
+            right: 1rem;
+            width: 150px;
+            height: 100px;
+            border-radius: 0.5rem;
+            overflow: hidden;
+            border: 3px solid white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        /* Bottle Styles */
+        .bottle-container {
+            position: relative;
+            width: 300px;
+            height: 300px;
+            margin: 0 auto;
+        }
+
+        .bottle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 80px;
+            height: 200px;
+            transform: translate(-50%, -50%);
+            transform-origin: center;
+        }
+
+        .player-position {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            font-size: 1.5rem;
+            border: 3px solid white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        }
+
+        .player-1 {
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+        }
+
+        .player-2 {
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #ec4899, #f43f5e);
+        }
     </style>
 </head>
 <body class="min-h-screen relative">
@@ -163,6 +248,40 @@
             <div class="flex items-center gap-3 text-pink-600">
                 <div class="spinner"></div>
                 <span class="font-semibold">Connecting...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Call Modal -->
+    <div id="videoModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl w-full max-w-4xl overflow-hidden shadow-2xl">
+            <div class="bg-gradient-to-r from-pink-500 to-purple-600 p-6 flex items-center justify-between">
+                <div class="flex items-center gap-3 text-white">
+                    <i data-lucide="video" class="w-6 h-6"></i>
+                    <span class="font-bold text-lg">Video Call</span>
+                </div>
+                <button onclick="endCall()" class="p-2 hover:bg-white/20 rounded-lg transition-colors">
+                    <i data-lucide="x" class="w-6 h-6 text-white"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <div class="video-container mb-4">
+                    <video id="remoteVideo" autoplay playsinline class="w-full h-full"></video>
+                    <div class="video-pip">
+                        <video id="localVideo" autoplay muted playsinline class="w-full h-full"></video>
+                    </div>
+                </div>
+                <div class="flex gap-3 justify-center">
+                    <button onclick="toggleMute()" id="muteBtn" class="p-4 bg-slate-700 hover:bg-slate-600 rounded-full transition-colors">
+                        <i data-lucide="mic" class="w-6 h-6 text-white"></i>
+                    </button>
+                    <button onclick="toggleVideo()" id="videoBtn" class="p-4 bg-slate-700 hover:bg-slate-600 rounded-full transition-colors">
+                        <i data-lucide="video" class="w-6 h-6 text-white"></i>
+                    </button>
+                    <button onclick="endCall()" class="p-4 bg-red-500 hover:bg-red-600 rounded-full transition-colors">
+                        <i data-lucide="phone-off" class="w-6 h-6 text-white"></i>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -238,7 +357,17 @@
             customText: '',
             copySuccess: false,
             channel: null,
-            soundEnabled: true
+            soundEnabled: true,
+            showBottleSpin: false,
+            bottleSpinning: false,
+            bottleRotation: 0,
+            // Video call state
+            localStream: null,
+            remoteStream: null,
+            peerConnection: null,
+            isMuted: false,
+            isVideoOff: false,
+            inCall: false
         };
 
         // ==================== UTILITY FUNCTIONS ====================
@@ -319,27 +448,193 @@
                 oscillator.start(audioContext.currentTime);
                 oscillator.stop(audioContext.currentTime + 0.3);
             } catch (err) {
-                // Audio context might not be available
                 console.log('Audio not available');
             }
         }
 
+        // ==================== VIDEO CALL FUNCTIONS ====================
+        
+        window.startVideoCall = async () => {
+            try {
+                showNotification('Starting video call...', 'info');
+                
+                // Get local media stream
+                state.localStream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: true
+                });
+
+                const localVideo = document.getElementById('localVideo');
+                if (localVideo) {
+                    localVideo.srcObject = state.localStream;
+                }
+
+                // Show video modal
+                document.getElementById('videoModal').classList.remove('hidden');
+                document.getElementById('videoModal').classList.add('flex');
+                state.inCall = true;
+
+                showNotification('Video call started!', 'success');
+                
+                // Note: In a real implementation, you would set up WebRTC peer connection here
+                // For now, this shows the UI. Full WebRTC setup requires a signaling server.
+                
+            } catch (err) {
+                console.error('Failed to start video call:', err);
+                showNotification('Failed to access camera/microphone', 'error');
+            }
+        };
+
+        window.endCall = () => {
+            if (state.localStream) {
+                state.localStream.getTracks().forEach(track => track.stop());
+                state.localStream = null;
+            }
+
+            document.getElementById('videoModal').classList.add('hidden');
+            document.getElementById('videoModal').classList.remove('flex');
+            state.inCall = false;
+            state.isMuted = false;
+            state.isVideoOff = false;
+
+            showNotification('Call ended', 'info');
+            render();
+        };
+
+        window.toggleMute = () => {
+            if (!state.localStream) return;
+            
+            state.isMuted = !state.isMuted;
+            state.localStream.getAudioTracks().forEach(track => {
+                track.enabled = !state.isMuted;
+            });
+
+            const muteBtn = document.getElementById('muteBtn');
+            const icon = muteBtn.querySelector('i');
+            icon.setAttribute('data-lucide', state.isMuted ? 'mic-off' : 'mic');
+            lucide.createIcons();
+            
+            showNotification(state.isMuted ? 'Microphone muted' : 'Microphone unmuted', 'info');
+        };
+
+        window.toggleVideo = () => {
+            if (!state.localStream) return;
+            
+            state.isVideoOff = !state.isVideoOff;
+            state.localStream.getVideoTracks().forEach(track => {
+                track.enabled = !state.isVideoOff;
+            });
+
+            const videoBtn = document.getElementById('videoBtn');
+            const icon = videoBtn.querySelector('i');
+            icon.setAttribute('data-lucide', state.isVideoOff ? 'video-off' : 'video');
+            lucide.createIcons();
+            
+            showNotification(state.isVideoOff ? 'Camera off' : 'Camera on', 'info');
+        };
+
+        // ==================== BOTTLE SPIN FUNCTIONS ====================
+        
+        window.showBottleSpinner = () => {
+            state.showBottleSpin = true;
+            playSound('click');
+            render();
+        };
+
+        window.hideBottleSpinner = () => {
+            state.showBottleSpin = false;
+            state.bottleSpinning = false;
+            render();
+        };
+
+        window.spinBottle = async () => {
+            if (state.bottleSpinning) return;
+            
+            state.bottleSpinning = true;
+            playSound('click');
+            render();
+
+            // Random rotation (3-5 full spins + random angle)
+            const spins = 3 + Math.random() * 2;
+            const randomAngle = Math.random() * 360;
+            const totalRotation = (spins * 360) + randomAngle;
+            
+            state.bottleRotation = totalRotation;
+            render();
+
+            // Wait for animation to complete
+            setTimeout(() => {
+                // Determine which player based on final angle
+                const finalAngle = totalRotation % 360;
+                let selectedPlayerIndex;
+                
+                // Player 1 is at top (0°), Player 2 is at bottom (180°)
+                // Give 90° range to each player
+                if ((finalAngle >= 315 || finalAngle < 45) || (finalAngle >= 135 && finalAngle < 225)) {
+                    // Points to top or bottom area
+                    selectedPlayerIndex = (finalAngle >= 315 || finalAngle < 45) ? 0 : 1;
+                } else {
+                    // Random if pointing sideways
+                    selectedPlayerIndex = Math.random() < 0.5 ? 0 : 1;
+                }
+
+                if (state.gameState) {
+                    const newState = { ...state.gameState };
+                    newState.currentTurnIndex = selectedPlayerIndex;
+                    updateGameStateInDb(newState);
+                }
+
+                state.bottleSpinning = false;
+                triggerConfetti();
+                showNotification(`${state.gameState.players[selectedPlayerIndex].name}'s turn!`, 'success');
+                
+                setTimeout(() => {
+                    state.showBottleSpin = false;
+                    render();
+                }, 2000);
+            }, 3000);
+        };
+
         // ==================== EVENT HANDLERS ====================
         
+        // Fixed input handler - doesn't trigger render during typing
+        let nameInputTimer;
         window.updatePlayerName = (e) => { 
             state.playerName = e.target.value;
             localStorage.setItem('playerName', state.playerName);
-            render(); 
+            
+            // Debounce render to prevent cursor jump
+            clearTimeout(nameInputTimer);
+            nameInputTimer = setTimeout(() => {
+                // Only update if not focused
+                if (document.activeElement !== e.target) {
+                    render();
+                }
+            }, 500);
         };
         
+        let codeInputTimer;
         window.updateRoomCode = (e) => { 
-            state.roomCode = e.target.value.toUpperCase(); 
-            render(); 
+            state.roomCode = e.target.value.toUpperCase();
+            
+            clearTimeout(codeInputTimer);
+            codeInputTimer = setTimeout(() => {
+                if (document.activeElement !== e.target) {
+                    render();
+                }
+            }, 500);
         };
         
+        let customTextTimer;
         window.updateCustomText = (e) => { 
-            state.customText = e.target.value; 
-            render(); 
+            state.customText = e.target.value;
+            
+            clearTimeout(customTextTimer);
+            customTextTimer = setTimeout(() => {
+                if (document.activeElement !== e.target) {
+                    render();
+                }
+            }, 500);
         };
         
         window.toggleCustomWriting = (val) => { 
@@ -385,7 +680,6 @@
                     createdAt: Date.now()
                 };
 
-                // Insert without updated_at field
                 const { error } = await supabaseClient
                     .from('game_rooms')
                     .insert([{ id: code, game_state: initialState }]);
@@ -451,7 +745,6 @@
                     });
                     currentGameState.status = 'playing';
 
-                    // Update without updated_at field
                     const { error: updateError } = await supabaseClient
                         .from('game_rooms')
                         .update({ game_state: currentGameState })
@@ -481,7 +774,6 @@
                 supabaseClient.removeChannel(state.channel);
             }
 
-            // Fetch initial state
             supabaseClient
                 .from('game_rooms')
                 .select('*')
@@ -494,7 +786,6 @@
                     }
                 });
 
-            // Subscribe to real-time updates
             state.channel = supabaseClient
                 .channel(`room_${gameId}`)
                 .on(
@@ -514,13 +805,11 @@
                         
                         state.gameState = newState;
                         
-                        // Reset custom writing if question changed
                         if (oldQuestion !== newQuestion) {
                             state.isWritingCustom = false;
                             state.customText = '';
                         }
                         
-                        // Play sound for new questions
                         if (!oldQuestion && newQuestion) {
                             playSound('success');
                         }
@@ -535,7 +824,6 @@
 
         async function updateGameStateInDb(newState) {
             try {
-                // Update without updated_at field
                 const { error } = await supabaseClient
                     .from('game_rooms')
                     .update({ game_state: newState })
@@ -564,6 +852,23 @@
             await updateGameStateInDb(newState);
         };
 
+        window.selectCustomMode = (mode) => {
+            if (!state.gameState) return;
+            
+            state.isWritingCustom = true;
+            const newState = { ...state.gameState };
+            newState.currentType = mode;
+            state.gameState = newState;
+            
+            playSound('click');
+            render();
+            
+            setTimeout(() => {
+                const input = document.getElementById('customInput');
+                if (input) input.focus();
+            }, 100);
+        };
+
         window.submitCustomQuestion = async () => {
             if (!state.customText.trim() || !state.gameState) return;
             
@@ -588,12 +893,10 @@
             const newState = { ...state.gameState };
             const currentPlayer = newState.players[newState.currentTurnIndex];
             
-            // Update scores
             newState.players = newState.players.map(p => 
                 p.uid === currentPlayer.uid ? { ...p, score: p.score + 1 } : p
             );
             
-            // Add to history
             if (!newState.history) newState.history = [];
             newState.history.push({
                 player: currentPlayer.name,
@@ -602,7 +905,6 @@
                 timestamp: Date.now()
             });
 
-            // Move to next turn
             newState.currentTurnIndex = (newState.currentTurnIndex + 1) % newState.players.length;
             newState.currentQuestion = null;
             newState.currentType = null;
@@ -652,7 +954,6 @@
                     <div class="min-h-screen flex items-center justify-center p-4">
                         <div class="w-full max-w-md">
                             <div class="bg-white/70 backdrop-blur-xl rounded-3xl shadow-2xl overflow-hidden border border-white/50 fade-in-up">
-                                <!-- Header -->
                                 <div class="relative bg-gradient-to-br from-pink-500 via-purple-500 to-indigo-600 p-8 text-center overflow-hidden">
                                     <div class="shimmer-bg absolute inset-0"></div>
                                     <div class="relative z-10">
@@ -667,7 +968,6 @@
                                     </div>
                                 </div>
 
-                                <!-- Form -->
                                 <div class="p-8 space-y-6">
                                     <div>
                                         <label class="block text-sm font-semibold text-slate-700 mb-2 ml-1">Your Name</label>
@@ -675,8 +975,8 @@
                                             <i data-lucide="user" class="absolute left-4 top-4 w-5 h-5 text-pink-400"></i>
                                             <input 
                                                 type="text" 
+                                                id="playerNameInput"
                                                 value="${state.playerName}" 
-                                                onchange="updatePlayerName(event)"
                                                 oninput="updatePlayerName(event)"
                                                 placeholder="Enter your name" 
                                                 class="w-full pl-12 pr-4 py-4 bg-white border-2 border-pink-100 rounded-xl focus:ring-2 focus:ring-pink-400 focus:border-transparent outline-none text-slate-700 font-medium transition-all"
@@ -718,8 +1018,8 @@
                                     <div class="flex gap-3">
                                         <input 
                                             type="text" 
+                                            id="roomCodeInput"
                                             value="${state.roomCode}" 
-                                            onchange="updateRoomCode(event)"
                                             oninput="updateRoomCode(event)" 
                                             placeholder="CODE" 
                                             maxlength="4" 
@@ -738,7 +1038,6 @@
                                 </div>
                             </div>
 
-                            <!-- Info Footer -->
                             <div class="mt-6 text-center text-sm text-slate-500">
                                 <p>Built with Supabase Realtime</p>
                             </div>
@@ -811,6 +1110,80 @@
                 return;
             }
 
+            // BOTTLE SPIN VIEW
+            if (state.showBottleSpin) {
+                const player1 = state.gameState.players[0];
+                const player2 = state.gameState.players[1];
+                
+                app.innerHTML = `
+                    <div class="min-h-screen flex items-center justify-center p-4">
+                        <div class="w-full max-w-2xl">
+                            <div class="bg-white/70 backdrop-blur-xl rounded-3xl shadow-2xl p-8 text-center fade-in-up">
+                                <h2 class="text-4xl font-bold text-slate-800 mb-4 display-font">Spin the Bottle!</h2>
+                                <p class="text-slate-600 mb-8">Let fate decide who goes next</p>
+                                
+                                <div class="bottle-container mx-auto mb-8 relative">
+                                    <div class="player-position player-1">
+                                        ${player1.name.charAt(0).toUpperCase()}
+                                    </div>
+                                    <div class="player-position player-2">
+                                        ${player2.name.charAt(0).toUpperCase()}
+                                    </div>
+                                    
+                                    <svg class="bottle ${state.bottleSpinning ? 'bottle-spinning' : ''}" style="transform: translate(-50%, -50%) rotate(${state.bottleRotation}deg);" viewBox="0 0 100 250" xmlns="http://www.w3.org/2000/svg">
+                                        <!-- Bottle Cap -->
+                                        <rect x="35" y="10" width="30" height="15" rx="3" fill="#8b5cf6"/>
+                                        
+                                        <!-- Bottle Neck -->
+                                        <path d="M 40 25 L 35 60 L 65 60 L 60 25 Z" fill="#a78bfa"/>
+                                        
+                                        <!-- Bottle Body -->
+                                        <ellipse cx="50" cy="60" rx="30" ry="8" fill="#c4b5fd"/>
+                                        <rect x="20" y="60" width="60" height="120" fill="url(#bottleGradient)"/>
+                                        <ellipse cx="50" cy="180" rx="30" ry="8" fill="#7c3aed"/>
+                                        
+                                        <!-- Bottle Bottom -->
+                                        <path d="M 20 180 L 25 220 L 75 220 L 80 180 Z" fill="#6d28d9"/>
+                                        <ellipse cx="50" cy="220" rx="27" ry="8" fill="#5b21b6"/>
+                                        
+                                        <!-- Shine Effect -->
+                                        <ellipse cx="35" cy="100" rx="8" ry="40" fill="white" opacity="0.3"/>
+                                        
+                                        <defs>
+                                            <linearGradient id="bottleGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                                                <stop offset="0%" style="stop-color:#8b5cf6;stop-opacity:1" />
+                                                <stop offset="50%" style="stop-color:#a78bfa;stop-opacity:1" />
+                                                <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+                                            </linearGradient>
+                                        </defs>
+                                    </svg>
+                                </div>
+
+                                <div class="flex gap-4 justify-center">
+                                    <button 
+                                        onclick="spinBottle()" 
+                                        ${state.bottleSpinning ? 'disabled' : ''}
+                                        class="px-8 py-4 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-xl font-bold text-lg shadow-lg hover:shadow-xl active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3"
+                                    >
+                                        <i data-lucide="rotate-cw" class="w-6 h-6"></i>
+                                        <span>${state.bottleSpinning ? 'Spinning...' : 'Spin Bottle'}</span>
+                                    </button>
+                                    <button 
+                                        onclick="hideBottleSpinner()" 
+                                        ${state.bottleSpinning ? 'disabled' : ''}
+                                        class="px-6 py-4 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-semibold transition-all disabled:opacity-50"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                lucide.createIcons();
+                return;
+            }
+
             // ACTIVE GAME
             const currentPlayer = state.gameState.players[state.gameState.currentTurnIndex];
             const isMyTurn = currentPlayer.uid === state.userId;
@@ -820,7 +1193,7 @@
             
             const headerHtml = `
                 <header class="bg-white/60 backdrop-blur-xl rounded-2xl shadow-lg p-6 mb-8 border border-white/50 fade-in-up">
-                    <div class="flex items-center justify-between">
+                    <div class="flex items-center justify-between mb-4">
                         <!-- Player 1 -->
                         <div class="flex items-center gap-4">
                             <div class="relative">
@@ -864,12 +1237,30 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Action Buttons -->
+                    <div class="flex gap-3 justify-center pt-4 border-t border-slate-200">
+                        <button 
+                            onclick="showBottleSpinner()" 
+                            class="px-4 py-2 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-lg font-semibold text-sm transition-all flex items-center gap-2"
+                        >
+                            <i data-lucide="rotate-cw" class="w-4 h-4"></i>
+                            <span>Spin Bottle</span>
+                        </button>
+                        <button 
+                            onclick="startVideoCall()" 
+                            class="px-4 py-2 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg font-semibold text-sm transition-all flex items-center gap-2"
+                        >
+                            <i data-lucide="video" class="w-4 h-4"></i>
+                            <span>Video Call</span>
+                        </button>
+                    </div>
                 </header>
             `;
 
             let mainHtml = '';
             
-            if (!state.gameState.currentQuestion) {
+            if (!state.gameState.currentQuestion && !state.isWritingCustom) {
                 // SELECTION MODE
                 mainHtml = `
                     <div class="text-center w-full max-w-lg fade-in-up">
@@ -903,55 +1294,124 @@
                         </div>
                         
                         ${isMyTurn ? `
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                                <!-- Truth Button -->
-                                <button 
-                                    onclick="selectMode('truth')" 
-                                    class="btn-primary group relative overflow-hidden h-56 rounded-3xl bg-gradient-to-br from-blue-400 via-indigo-500 to-purple-600 text-white shadow-2xl hover:shadow-blue-500/50 hover:scale-105 active:scale-95 transition-all"
-                                >
-                                    <div class="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
-                                    <div class="relative z-10 flex flex-col items-center justify-center h-full p-6">
-                                        <div class="mb-4 p-4 bg-white/20 rounded-full">
-                                            <i data-lucide="message-circle" class="w-12 h-12"></i>
+                            <div class="space-y-4">
+                                <!-- Random Questions -->
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <button 
+                                        onclick="selectMode('truth')" 
+                                        class="btn-primary group relative overflow-hidden h-40 rounded-2xl bg-gradient-to-br from-blue-400 via-indigo-500 to-purple-600 text-white shadow-xl hover:shadow-blue-500/50 hover:scale-105 active:scale-95 transition-all"
+                                    >
+                                        <div class="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
+                                        <div class="relative z-10 flex flex-col items-center justify-center h-full p-4">
+                                            <i data-lucide="message-circle" class="w-10 h-10 mb-2"></i>
+                                            <span class="text-2xl font-black mb-1">TRUTH</span>
+                                            <span class="text-blue-100 text-xs">Random Question</span>
                                         </div>
-                                        <span class="text-3xl font-black tracking-wider mb-2">TRUTH</span>
-                                        <span class="text-blue-100 text-sm font-medium">Ask me anything</span>
-                                    </div>
-                                    <div class="absolute bottom-0 left-0 right-0 h-1 bg-white/30"></div>
-                                </button>
+                                    </button>
 
-                                <!-- Dare Button -->
-                                <button 
-                                    onclick="selectMode('dare')" 
-                                    class="btn-primary group relative overflow-hidden h-56 rounded-3xl bg-gradient-to-br from-rose-400 via-pink-500 to-red-600 text-white shadow-2xl hover:shadow-pink-500/50 hover:scale-105 active:scale-95 transition-all"
-                                >
-                                    <div class="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
-                                    <div class="relative z-10 flex flex-col items-center justify-center h-full p-6">
-                                        <div class="mb-4 p-4 bg-white/20 rounded-full">
-                                            <i data-lucide="flame" class="w-12 h-12"></i>
+                                    <button 
+                                        onclick="selectMode('dare')" 
+                                        class="btn-primary group relative overflow-hidden h-40 rounded-2xl bg-gradient-to-br from-rose-400 via-pink-500 to-red-600 text-white shadow-xl hover:shadow-pink-500/50 hover:scale-105 active:scale-95 transition-all"
+                                    >
+                                        <div class="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
+                                        <div class="relative z-10 flex flex-col items-center justify-center h-full p-4">
+                                            <i data-lucide="flame" class="w-10 h-10 mb-2"></i>
+                                            <span class="text-2xl font-black mb-1">DARE</span>
+                                            <span class="text-pink-100 text-xs">Random Challenge</span>
                                         </div>
-                                        <span class="text-3xl font-black tracking-wider mb-2">DARE</span>
-                                        <span class="text-pink-100 text-sm font-medium">Challenge accepted</span>
+                                    </button>
+                                </div>
+
+                                <!-- Custom Questions -->
+                                <div class="relative">
+                                    <div class="absolute inset-0 flex items-center">
+                                        <div class="w-full border-t-2 border-slate-200"></div>
                                     </div>
-                                    <div class="absolute bottom-0 left-0 right-0 h-1 bg-white/30"></div>
-                                </button>
+                                    <div class="relative flex justify-center">
+                                        <span class="px-4 bg-gradient-to-br from-pink-50 via-purple-50 to-indigo-50 text-xs font-semibold text-slate-400 uppercase tracking-wider">Or Write Your Own</span>
+                                    </div>
+                                </div>
+
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <button 
+                                        onclick="selectCustomMode('truth')" 
+                                        class="btn-primary relative overflow-hidden h-24 rounded-xl bg-white border-2 border-blue-200 hover:border-blue-400 hover:bg-blue-50 text-blue-700 shadow-md hover:shadow-lg active:scale-95 transition-all"
+                                    >
+                                        <div class="flex flex-col items-center justify-center h-full">
+                                            <i data-lucide="pen-line" class="w-6 h-6 mb-1"></i>
+                                            <span class="font-bold">Custom Truth</span>
+                                        </div>
+                                    </button>
+
+                                    <button 
+                                        onclick="selectCustomMode('dare')" 
+                                        class="btn-primary relative overflow-hidden h-24 rounded-xl bg-white border-2 border-pink-200 hover:border-pink-400 hover:bg-pink-50 text-pink-700 shadow-md hover:shadow-lg active:scale-95 transition-all"
+                                    >
+                                        <div class="flex flex-col items-center justify-center h-full">
+                                            <i data-lucide="pen-line" class="w-6 h-6 mb-1"></i>
+                                            <span class="font-bold">Custom Dare</span>
+                                        </div>
+                                    </button>
+                                </div>
                             </div>
                         ` : ''}
                     </div>
                 `;
-            } else {
-                // CARD MODE
+            } else if (state.isWritingCustom) {
+                // CUSTOM QUESTION INPUT
+                const isTruth = state.gameState.currentType === 'truth';
                 mainHtml = `
                     <div class="w-full max-w-2xl fade-in-up">
                         <div class="relative bg-white/80 backdrop-blur-lg rounded-3xl shadow-2xl overflow-hidden border-4 ${isTruth ? 'border-blue-200' : 'border-pink-200'}">
-                            <!-- Card Header -->
+                            <div class="relative py-6 px-8 flex items-center justify-center gap-3 ${isTruth ? 'bg-gradient-to-r from-blue-500 to-indigo-600' : 'bg-gradient-to-r from-rose-500 to-pink-600'} text-white">
+                                <div class="shimmer-bg absolute inset-0"></div>
+                                <i data-lucide="pen-line" class="w-7 h-7 relative z-10"></i>
+                                <span class="font-black tracking-widest text-xl uppercase relative z-10">Custom ${state.gameState.currentType}</span>
+                            </div>
+
+                            <div class="p-10">
+                                <h3 class="text-2xl font-bold text-slate-800 mb-6 text-center">Write your own ${state.gameState.currentType}!</h3>
+                                
+                                <textarea 
+                                    id="customInput" 
+                                    oninput="updateCustomText(event)" 
+                                    class="w-full p-6 text-lg border-2 ${isTruth ? 'border-blue-200 focus:border-blue-400 focus:ring-blue-200' : 'border-pink-200 focus:border-pink-400 focus:ring-pink-200'} rounded-xl outline-none focus:ring-2 bg-white resize-none transition-all" 
+                                    rows="4" 
+                                    placeholder="Type your custom ${state.gameState.currentType} here..."
+                                    autofocus
+                                >${state.customText}</textarea>
+
+                                <div class="flex gap-4 mt-6">
+                                    <button 
+                                        onclick="toggleCustomWriting(false)" 
+                                        class="px-8 py-4 text-base font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button 
+                                        onclick="submitCustomQuestion()" 
+                                        ${!state.customText.trim() ? 'disabled' : ''} 
+                                        class="flex-1 px-8 py-4 text-base font-bold text-white ${isTruth ? 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700' : 'bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700'} rounded-xl shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 transition-all"
+                                    >
+                                        <span>Send Challenge</span>
+                                        <i data-lucide="send" class="w-5 h-5"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                // QUESTION CARD MODE
+                mainHtml = `
+                    <div class="w-full max-w-2xl fade-in-up">
+                        <div class="relative bg-white/80 backdrop-blur-lg rounded-3xl shadow-2xl overflow-hidden border-4 ${isTruth ? 'border-blue-200' : 'border-pink-200'}">
                             <div class="relative py-6 px-8 flex items-center justify-center gap-3 ${isTruth ? 'bg-gradient-to-r from-blue-500 to-indigo-600' : 'bg-gradient-to-r from-rose-500 to-pink-600'} text-white">
                                 <div class="shimmer-bg absolute inset-0"></div>
                                 <i data-lucide="${isTruth ? 'message-circle' : 'flame'}" class="w-7 h-7 relative z-10"></i>
                                 <span class="font-black tracking-widest text-xl uppercase relative z-10">${state.gameState.currentType}</span>
                             </div>
 
-                            <!-- Question Card -->
                             <div class="p-10">
                                 <div class="text-center mb-8">
                                     <p class="text-3xl font-bold text-slate-800 leading-relaxed display-font">${state.gameState.currentQuestion}</p>
@@ -959,55 +1419,14 @@
                                 
                                 ${!isMyTurn ? `
                                     <div class="p-6 bg-gradient-to-br from-slate-50 to-slate-100 rounded-2xl border-2 border-slate-200">
-                                        <div class="flex items-center justify-center gap-3 text-slate-600 mb-4">
+                                        <div class="flex items-center justify-center gap-3 text-slate-600">
                                             <div class="w-3 h-3 bg-slate-400 rounded-full animate-ping"></div>
                                             <span class="font-semibold">Waiting for ${currentPlayer.name} to complete...</span>
-                                        </div>
-                                        
-                                        <!-- Custom Question Section -->
-                                        <div class="mt-6 pt-6 border-t-2 border-slate-200">
-                                            ${!state.isWritingCustom ? `
-                                                <button 
-                                                    onclick="toggleCustomWriting(true)" 
-                                                    class="flex items-center justify-center gap-2 w-full px-4 py-3 text-sm text-slate-500 hover:text-pink-600 hover:bg-pink-50 font-semibold rounded-xl transition-all border-2 border-dashed border-slate-300 hover:border-pink-300"
-                                                >
-                                                    <i data-lucide="pen-line" class="w-5 h-5"></i>
-                                                    <span>Write a custom ${state.gameState.currentType}!</span>
-                                                </button>
-                                            ` : `
-                                                <div class="space-y-3 fade-in-up">
-                                                    <textarea 
-                                                        id="customInput" 
-                                                        onchange="updateCustomText(event)"
-                                                        oninput="updateCustomText(event)" 
-                                                        class="w-full p-4 text-base border-2 border-pink-200 rounded-xl outline-none focus:border-pink-400 focus:ring-2 focus:ring-pink-200 bg-white resize-none transition-all" 
-                                                        rows="3" 
-                                                        placeholder="Type your custom challenge..."
-                                                    >${state.customText}</textarea>
-                                                    <div class="flex gap-3">
-                                                        <button 
-                                                            onclick="toggleCustomWriting(false)" 
-                                                            class="px-6 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
-                                                        >
-                                                            Cancel
-                                                        </button>
-                                                        <button 
-                                                            onclick="submitCustomQuestion()" 
-                                                            ${!state.customText.trim() ? 'disabled' : ''} 
-                                                            class="flex-1 px-6 py-3 text-sm font-bold text-white bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700 rounded-xl shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all"
-                                                        >
-                                                            <span>Send Challenge</span>
-                                                            <i data-lucide="send" class="w-4 h-4"></i>
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            `}
                                         </div>
                                     </div>
                                 ` : ''}
                             </div>
                             
-                            <!-- Complete Button -->
                             ${isMyTurn ? `
                                 <div class="p-6 bg-gradient-to-br from-slate-50 to-slate-100 border-t-2 border-slate-200">
                                     <button 
@@ -1061,7 +1480,6 @@
             app.innerHTML = `
                 <div class="min-h-screen p-4 md:p-8">
                     <div class="w-full max-w-4xl mx-auto">
-                        <!-- Leave Button -->
                         <div class="flex justify-end mb-4">
                             <button 
                                 onclick="leaveGame()" 
@@ -1095,7 +1513,6 @@
             render();
         });
 
-        // Initial render
         setTimeout(() => {
             createParticles();
             render();
