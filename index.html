@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Couple's Truth or Dare</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Import Supabase -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .perspective-1000 { perspective: 1000px; }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        /* Custom Scrollbar */
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 min-h-screen text-slate-700">
+
+    <div id="app" class="min-h-screen flex flex-col">
+        <!-- Content will be injected here by JavaScript -->
+        <div class="flex-1 flex items-center justify-center">
+            <div class="animate-pulse flex items-center gap-2 text-rose-500 font-semibold">
+                <i data-lucide="heart" class="w-6 h-6 fill-rose-500"></i>
+                Connecting to Supabase...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. CONFIGURATION ---
+        // Extracted project ID from your token: nlubybdxsfudqfddrchh
+        const SUPABASE_URL = 'https://nlubybdxsfudqfddrchh.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5sdWJ5YmR4c2Z1ZHFmZGRyY2hoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4ODA5MTcsImV4cCI6MjA4NTQ1NjkxN30.We0PJQ8fK6t51mR8pOZa7_my5CAjad5JkBPAmZ3UznE';
+
+        // Initialize Supabase - Renamed to avoid identifier conflict
+        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // --- DATA ---
+        const TRUTHS = [
+            "What was your very first impression of me?",
+            "What is one secret fantasy you've never told me?",
+            "When did you realize you were in love with me?",
+            "What is the most embarrassing thing you've done to get my attention?",
+            "If we could travel anywhere tomorrow, where would you take me?",
+            "What's your favorite physical feature of mine?",
+            "What is one thing I do that drives you crazy (in a good or bad way)?",
+            "Have you ever dreamt about me? If yes, what happened?",
+            "What is the most romantic thing I've ever done for you?",
+            "If you had to describe our relationship in one word, what would it be?",
+            "What is your biggest fear regarding our relationship?",
+            "What's a song that reminds you of me?",
+            "Who is the better kisser?",
+            "What's the funniest memory we have together?",
+            "If you could change one thing about me, what would it be?"
+        ];
+
+        const DARES = [
+            "Give me a foot massage for 2 minutes.",
+            "Let me scroll through your photo gallery for 1 minute.",
+            "Do your best impression of me.",
+            "Kiss me somewhere other than my lips.",
+            "Send a voice note to your best friend saying you love them (without context).",
+            "Post a picture of us on your story right now with a cheesy caption.",
+            "Let me do your makeup (or draw on your face) however I want.",
+            "Whisper something naughty in my ear.",
+            "Slow dance with me to no music for 1 minute.",
+            "Let me tickle you for 30 seconds without you laughing.",
+            "Recreate our first kiss.",
+            "Give me a piggyback ride around the room.",
+            "Stare into my eyes for 60 seconds without blinking or laughing.",
+            "Feed me a snack without using your hands.",
+            "Let me write a status on your social media and leave it for 10 minutes."
+        ];
+
+        // --- STATE ---
+        const state = {
+            userId: 'user_' + Math.random().toString(36).substr(2, 9), // Simple random ID for anon users
+            playerName: '',
+            roomCode: '',
+            gameId: null,
+            gameState: null,
+            loading: false,
+            error: '',
+            isWritingCustom: false,
+            customText: '',
+            copySuccess: false,
+            channel: null // To store the realtime subscription
+        };
+
+        // Initialize Icons
+        lucide.createIcons();
+        render(); // Initial Render
+
+        // --- GAME ACTIONS ---
+
+        window.updatePlayerName = (e) => { state.playerName = e.target.value; render(); };
+        window.updateRoomCode = (e) => { state.roomCode = e.target.value; render(); };
+        window.updateCustomText = (e) => { state.customText = e.target.value; render(); }; 
+        
+        window.toggleCustomWriting = (val) => { 
+            state.isWritingCustom = val; 
+            if(!val) state.customText = ''; 
+            render(); 
+        };
+
+        window.createGame = async () => {
+            if (!state.playerName.trim()) { state.error = "Please enter your name first!"; render(); return; }
+            state.loading = true;
+            state.error = '';
+            render();
+
+            try {
+                const code = Math.floor(1000 + Math.random() * 9000).toString();
+                
+                const initialstate = {
+                    code: code,
+                    players: [{ uid: state.userId, name: state.playerName, score: 0 }],
+                    currentTurnIndex: 0,
+                    currentQuestion: null,
+                    currentType: null,
+                    status: 'waiting',
+                    history: []
+                };
+
+                // SUPABASE: Insert row
+                const { error } = await supabaseClient
+                    .from('game_rooms')
+                    .insert([{ id: code, game_state: initialstate }]);
+
+                if (error) throw error;
+
+                state.gameId = code;
+                subscribeToGame(code);
+            } catch (err) {
+                console.error(err);
+                state.error = "Failed to create room: " + err.message;
+            } finally {
+                state.loading = false;
+                render();
+            }
+        };
+
+        window.joinGame = async () => {
+            if (!state.playerName.trim()) { state.error = "Please enter your name first!"; render(); return; }
+            if (!state.roomCode.trim()) { state.error = "Please enter a room code!"; render(); return; }
+            state.loading = true;
+            state.error = '';
+            render();
+
+            try {
+                const targetGameId = state.roomCode.trim();
+                
+                // SUPABASE: Fetch row
+                const { data, error } = await supabaseClient
+                    .from('game_rooms')
+                    .select('*')
+                    .eq('id', targetGameId)
+                    .single();
+
+                if (error || !data) throw new Error("Room not found!");
+
+                const currentGameState = data.game_state;
+                const isAlreadyIn = currentGameState.players.some(p => p.uid === state.userId);
+                
+                if (!isAlreadyIn) {
+                    if (currentGameState.players.length >= 2) throw new Error("Room is full!");
+                    
+                    const newPlayers = [...currentGameState.players, { uid: state.userId, name: state.playerName, score: 0 }];
+                    currentGameState.players = newPlayers;
+                    currentGameState.status = 'playing';
+
+                    // SUPABASE: Update row
+                    const { error: updateError } = await supabaseClient
+                        .from('game_rooms')
+                        .update({ game_state: currentGameState })
+                        .eq('id', targetGameId);
+                    
+                    if (updateError) throw updateError;
+                }
+
+                state.gameId = targetGameId;
+                subscribeToGame(targetGameId);
+            } catch (err) {
+                state.error = err.message;
+            } finally {
+                state.loading = false;
+                render();
+            }
+        };
+
+        function subscribeToGame(gameId) {
+            // Unsubscribe from previous if exists
+            if (state.channel) supabaseClient.removeChannel(state.channel);
+
+            // Fetch initial state immediately to show UI
+            supabaseClient.from('game_rooms').select('*').eq('id', gameId).single().then(({data}) => {
+                if(data) {
+                    state.gameState = data.game_state;
+                    render();
+                }
+            });
+
+            // SUPABASE REALTIME: Listen for UPDATE events
+            state.channel = supabaseClient
+                .channel('room_updates')
+                .on(
+                    'postgres_changes',
+                    { event: 'UPDATE', schema: 'public', table: 'game_rooms', filter: `id=eq.${gameId}` },
+                    (payload) => {
+                        console.log('Update received!', payload);
+                        state.gameState = payload.new.game_state;
+                        
+                        // Reset custom writing UI if turn changes (question becomes null)
+                        if (!state.gameState.currentQuestion) {
+                            state.isWritingCustom = false;
+                            state.customText = '';
+                        }
+                        render();
+                    }
+                )
+                .subscribe();
+        }
+
+        async function updateGameStateInDb(newState) {
+            const { error } = await supabaseClient
+                .from('game_rooms')
+                .update({ game_state: newState })
+                .eq('id', state.gameId);
+            
+            if (error) {
+                console.error("Sync error", error);
+                state.error = "Failed to sync move.";
+                render();
+            }
+        }
+
+        window.selectMode = async (mode) => {
+            if (!state.gameState) return;
+            const pool = mode === 'truth' ? TRUTHS : DARES;
+            const randomQ = pool[Math.floor(Math.random() * pool.length)];
+            
+            // Clone state and update
+            const newState = { ...state.gameState };
+            newState.currentType = mode;
+            newState.currentQuestion = randomQ;
+
+            await updateGameStateInDb(newState);
+        };
+
+        window.submitCustomQuestion = async () => {
+            if (!state.customText.trim() || !state.gameState) return;
+            
+            const newState = { ...state.gameState };
+            newState.currentQuestion = state.customText;
+
+            await updateGameStateInDb(newState);
+            
+            state.isWritingCustom = false;
+            state.customText = '';
+            render();
+        };
+
+        window.completeTurn = async () => {
+            if (!state.gameState) return;
+            
+            const newState = { ...state.gameState };
+            const currentPlayer = newState.players[newState.currentTurnIndex];
+            
+            // Update scores
+            newState.players = newState.players.map(p => 
+                p.uid === currentPlayer.uid ? { ...p, score: p.score + 1 } : p
+            );
+            
+            // Next turn
+            newState.currentTurnIndex = (newState.currentTurnIndex + 1) % newState.players.length;
+            
+            // Add history
+            if (!newState.history) newState.history = [];
+            newState.history.push({
+                player: currentPlayer.name,
+                type: newState.currentType,
+                question: newState.currentQuestion,
+                timestamp: Date.now()
+            });
+
+            // Reset current turn data
+            newState.currentQuestion = null;
+            newState.currentType = null;
+
+            await updateGameStateInDb(newState);
+        };
+
+        // Improved Copy function with Fallback
+        window.copyCode = () => {
+            if (!state.gameState?.code) return;
+
+            // Helper to show success
+            const showSuccess = () => {
+                state.copySuccess = true;
+                render();
+                setTimeout(() => { state.copySuccess = false; render(); }, 2000);
+            };
+
+            // Helper for fallback method
+            const fallbackCopy = (text) => {
+                const textArea = document.createElement("textarea");
+                textArea.value = text;
+                // Make it invisible but part of the DOM
+                textArea.style.position = "fixed";
+                textArea.style.opacity = "0";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                    const successful = document.execCommand('copy');
+                    if (successful) showSuccess();
+                    else console.error('Fallback copy failed.');
+                } catch (err) {
+                    console.error('Fallback copy error', err);
+                }
+                document.body.removeChild(textArea);
+            };
+            
+            // Try Modern API first
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(state.gameState.code)
+                    .then(showSuccess)
+                    .catch(err => {
+                        console.warn("Clipboard API failed (likely permissions), trying fallback...", err);
+                        fallbackCopy(state.gameState.code);
+                    });
+            } else {
+                // Use fallback immediately if clipboard API not available
+                fallbackCopy(state.gameState.code);
+            }
+        };
+
+        // --- RENDER LOGIC (UI) ---
+        // This part is largely identical to the Firebase version, just using state.userId instead of state.user.uid
+        
+        function render() {
+            const app = document.getElementById('app');
+            
+            // 2. Lobby (No Game ID)
+            if (!state.gameId) {
+                app.innerHTML = `
+                    <div class="min-h-screen flex items-center justify-center p-4">
+                        <div class="w-full max-w-md bg-white/80 backdrop-blur-lg rounded-3xl shadow-2xl overflow-hidden border border-white/50 p-8 fade-in">
+                            <div class="flex justify-center mb-6 relative">
+                                <i data-lucide="heart" class="w-16 h-16 text-rose-500 fill-rose-500 animate-pulse"></i>
+                                <i data-lucide="sparkles" class="absolute -top-2 right-1/4 w-8 h-8 text-yellow-400 animate-bounce"></i>
+                            </div>
+                            <h1 class="text-3xl font-bold text-center text-slate-800 mb-2">Truth or Dare</h1>
+                            <p class="text-center text-slate-500 mb-8">Couple's Edition (Supabase) ❤️</p>
+                            
+                            <div class="space-y-6">
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-600 mb-2 ml-1">Your Name</label>
+                                    <div class="relative">
+                                        <i data-lucide="user" class="absolute left-3 top-3.5 w-5 h-5 text-rose-300"></i>
+                                        <input type="text" value="${state.playerName}" oninput="updatePlayerName(event)" placeholder="e.g. Rahul" class="w-full pl-10 pr-4 py-3 bg-white border border-rose-100 rounded-xl focus:ring-2 focus:ring-rose-400 outline-none text-slate-700">
+                                    </div>
+                                </div>
+
+                                ${state.error ? `<div class="p-3 bg-red-100 text-red-600 text-sm rounded-lg text-center">${state.error}</div>` : ''}
+
+                                <button onclick="createGame()" ${state.loading ? 'disabled' : ''} class="w-full py-3.5 bg-gradient-to-r from-rose-500 to-pink-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-rose-300 active:scale-95 transition-all flex items-center justify-center gap-2">
+                                    <i data-lucide="sparkles" class="w-5 h-5"></i> Create New Game
+                                </button>
+                                
+                                <div class="flex items-center gap-4 py-2">
+                                    <div class="h-px bg-slate-200 flex-1"></div>
+                                    <span class="text-xs text-slate-400 uppercase">Or Join</span>
+                                    <div class="h-px bg-slate-200 flex-1"></div>
+                                </div>
+
+                                <div class="flex gap-2">
+                                    <input type="text" value="${state.roomCode}" oninput="updateRoomCode(event)" placeholder="Room Code" maxlength="4" class="flex-1 px-4 py-3 bg-white border border-rose-100 rounded-xl focus:ring-2 focus:ring-rose-400 outline-none text-center tracking-widest text-slate-700">
+                                    <button onclick="joinGame()" ${state.loading ? 'disabled' : ''} class="px-6 py-3 bg-white border-2 border-rose-500 text-rose-600 rounded-xl font-semibold hover:bg-rose-50 active:scale-95 transition-all">Join</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                lucide.createIcons();
+                return;
+            }
+
+            // 3. Loading Game Data
+            if (!state.gameState || !state.gameState.players) {
+                 app.innerHTML = `
+                    <div class="min-h-screen flex items-center justify-center">
+                        <div class="bg-white p-6 rounded-2xl shadow-xl flex items-center gap-3 text-rose-500">
+                           <i data-lucide="refresh-cw" class="w-6 h-6 animate-spin"></i>
+                           <span class="font-semibold">Loading Room...</span>
+                        </div>
+                    </div>`;
+                lucide.createIcons();
+                return;
+            }
+
+            // 4. Waiting Room
+            if (state.gameState.status === 'waiting') {
+                app.innerHTML = `
+                    <div class="min-h-screen flex items-center justify-center p-4">
+                        <div class="w-full max-w-md bg-white rounded-3xl shadow-xl p-8 text-center fade-in">
+                            <div class="mb-6 inline-flex p-4 bg-rose-100 rounded-full">
+                                <i data-lucide="users" class="w-8 h-8 text-rose-500"></i>
+                            </div>
+                            <h2 class="text-2xl font-bold text-slate-800 mb-2">Waiting for Partner</h2>
+                            <p class="text-slate-500 mb-6">Share this code with your special someone:</p>
+                            
+                            <div onclick="copyCode()" class="bg-slate-100 p-4 rounded-xl flex items-center justify-between mb-2 cursor-pointer hover:bg-slate-200 transition-colors">
+                                <span class="text-3xl font-mono font-bold text-slate-700 tracking-[0.2em]">${state.gameState.code}</span>
+                                <i data-lucide="copy" class="w-5 h-5 ${state.copySuccess ? 'text-green-500' : 'text-slate-400'}"></i>
+                            </div>
+                            <div class="h-6 mb-4 text-xs text-green-600 font-medium">${state.copySuccess ? 'Copied!' : ''}</div>
+                            
+                            <div class="flex items-center justify-center gap-2 text-sm text-slate-400 animate-pulse">
+                                <i data-lucide="refresh-cw" class="w-4 h-4 animate-spin"></i> Waiting for them to join...
+                            </div>
+                        </div>
+                    </div>`;
+                lucide.createIcons();
+                return;
+            }
+
+            // 5. Active Game Board
+            const currentPlayer = state.gameState.players[state.gameState.currentTurnIndex];
+            const isMyTurn = currentPlayer.uid === state.userId;
+            const isTruth = state.gameState.currentType === 'truth';
+            
+            // Build Header HTML
+            const headerHtml = `
+                <header class="flex items-center justify-between mb-8 bg-white/60 backdrop-blur-md p-4 rounded-2xl shadow-sm border border-white/50">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-400 to-indigo-500 flex items-center justify-center text-white font-bold text-lg shadow-md">
+                            ${state.gameState.players[0].name.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                            <p class="font-semibold text-slate-700 text-sm md:text-base">${state.gameState.players[0].name}</p>
+                            <p class="text-xs text-slate-400">Score: ${state.gameState.players[0].score}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-3 text-right">
+                        <div>
+                            <p class="font-semibold text-slate-700 text-sm md:text-base">${state.gameState.players[1].name}</p>
+                            <p class="text-xs text-slate-400">Score: ${state.gameState.players[1].score}</p>
+                        </div>
+                        <div class="w-10 h-10 rounded-full bg-gradient-to-tr from-rose-400 to-pink-500 flex items-center justify-center text-white font-bold text-lg shadow-md">
+                            ${state.gameState.players[1].name.charAt(0).toUpperCase()}
+                        </div>
+                    </div>
+                </header>`;
+
+            // Build Main Content
+            let mainHtml = '';
+            
+            if (!state.gameState.currentQuestion) {
+                // SELECTION MODE
+                mainHtml = `
+                    <div class="text-center w-full max-w-sm fade-in">
+                        <div class="mb-8">
+                            ${isMyTurn 
+                                ? `<h2 class="text-3xl font-bold text-slate-800">It's your turn!</h2>`
+                                : `<div class="flex flex-col items-center">
+                                    <div class="w-16 h-16 rounded-full bg-white p-1 shadow-lg mb-4 animate-bounce">
+                                        <div class="w-full h-full rounded-full bg-slate-200 flex items-center justify-center text-2xl font-bold text-slate-500">${currentPlayer.name.charAt(0)}</div>
+                                    </div>
+                                    <h2 class="text-2xl font-bold text-slate-700">${currentPlayer.name} is choosing...</h2>
+                                   </div>`
+                            }
+                        </div>
+                        
+                        ${isMyTurn ? `
+                        <div class="grid grid-cols-2 gap-4">
+                            <button onclick="selectMode('truth')" class="group relative overflow-hidden h-48 rounded-2xl bg-gradient-to-br from-blue-400 to-indigo-600 text-white shadow-xl hover:scale-105 transition-all">
+                                <div class="relative z-10 flex flex-col items-center justify-center h-full">
+                                    <i data-lucide="message-circle" class="w-12 h-12 mb-3 text-blue-100"></i>
+                                    <span class="text-2xl font-bold tracking-wider">TRUTH</span>
+                                </div>
+                            </button>
+                            <button onclick="selectMode('dare')" class="group relative overflow-hidden h-48 rounded-2xl bg-gradient-to-br from-rose-400 to-pink-600 text-white shadow-xl hover:scale-105 transition-all">
+                                <div class="relative z-10 flex flex-col items-center justify-center h-full">
+                                    <i data-lucide="zap" class="w-12 h-12 mb-3 text-rose-100"></i>
+                                    <span class="text-2xl font-bold tracking-wider">DARE</span>
+                                </div>
+                            </button>
+                        </div>` : ''}
+                    </div>`;
+            } else {
+                // CARD MODE
+                mainHtml = `
+                    <div class="w-full max-w-md perspective-1000 fade-in">
+                        <div class="relative bg-white rounded-3xl shadow-2xl overflow-hidden border-4 ${isTruth ? 'border-blue-100' : 'border-rose-100'}">
+                            <div class="py-6 px-8 flex items-center justify-center gap-2 ${isTruth ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'}">
+                                <i data-lucide="${isTruth ? 'message-circle' : 'flame'}" class="w-6 h-6"></i>
+                                <span class="font-bold tracking-widest uppercase">${state.gameState.currentType}</span>
+                            </div>
+                            <div class="p-8 text-center">
+                                <p class="text-2xl font-medium text-slate-800 leading-relaxed">${state.gameState.currentQuestion}</p>
+                                
+                                ${!isMyTurn ? `
+                                    <div class="mt-8 p-4 bg-slate-50 rounded-xl text-slate-500 text-sm flex items-center justify-center gap-2">
+                                        <div class="w-2 h-2 bg-slate-400 rounded-full animate-ping"></div>
+                                        Waiting for ${currentPlayer.name} to complete...
+                                    </div>
+                                    
+                                    <!-- Custom Question Section for Partner -->
+                                    <div class="mt-4 pt-4 border-t border-slate-100">
+                                        ${!state.isWritingCustom ? `
+                                            <button onclick="toggleCustomWriting(true)" class="flex items-center justify-center gap-2 w-full text-sm text-slate-400 hover:text-rose-500 font-medium transition-colors">
+                                                <i data-lucide="pen-line" class="w-4 h-4"></i>
+                                                <span>Write a custom ${state.gameState.currentType}!</span>
+                                            </button>
+                                        ` : `
+                                            <div class="fade-in">
+                                                <textarea id="customInput" oninput="updateCustomText(event)" class="w-full p-3 text-sm border border-slate-200 rounded-lg outline-none bg-slate-50" rows="2" placeholder="Type custom challenge...">${state.customText}</textarea>
+                                                <div class="flex gap-2 mt-2">
+                                                    <button onclick="toggleCustomWriting(false)" class="px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 rounded-lg">Cancel</button>
+                                                    <button onclick="submitCustomQuestion()" ${!state.customText.trim() ? 'disabled' : ''} class="flex-1 px-3 py-1.5 text-xs font-bold text-white bg-rose-500 hover:bg-rose-600 rounded-lg shadow-sm disabled:opacity-50 flex items-center justify-center gap-2">
+                                                        <span>Send</span> <i data-lucide="send" class="w-3 h-3"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        `}
+                                    </div>
+                                ` : ''}
+                            </div>
+                            
+                            ${isMyTurn ? `
+                            <div class="p-6 bg-slate-50 border-t border-slate-100">
+                                <button onclick="completeTurn()" class="w-full py-4 rounded-xl font-bold text-lg text-white shadow-lg active:scale-95 flex items-center justify-center gap-2 ${isTruth ? 'bg-gradient-to-r from-blue-500 to-indigo-600' : 'bg-gradient-to-r from-rose-500 to-pink-600'}">
+                                    <span>Completed</span> <i data-lucide="arrow-right" class="w-5 h-5"></i>
+                                </button>
+                            </div>` : ''}
+                        </div>
+                    </div>`;
+            }
+
+            // Build History HTML
+            let historyHtml = '';
+            if (state.gameState.history && state.gameState.history.length > 0) {
+                const historyItems = [...state.gameState.history].reverse().map(item => `
+                    <div class="flex items-start gap-3 text-sm">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase mt-0.5 ${item.type === 'truth' ? 'bg-blue-100 text-blue-600' : 'bg-rose-100 text-rose-600'}">${item.type}</span>
+                        <div>
+                            <span class="font-semibold text-slate-700">${item.player}</span>
+                            <span class="text-slate-500 mx-1">was asked:</span>
+                            <span class="text-slate-600 italic">"${item.question}"</span>
+                        </div>
+                    </div>
+                `).join('');
+                
+                historyHtml = `
+                    <div class="mt-8 bg-white/40 backdrop-blur-sm rounded-xl p-4 max-h-32 overflow-y-auto custom-scrollbar w-full max-w-2xl">
+                        <h3 class="text-xs font-bold text-slate-400 uppercase mb-3">Recent Activity</h3>
+                        <div class="space-y-3">${historyItems}</div>
+                    </div>`;
+            }
+
+            app.innerHTML = `
+                <div class="p-4 md:p-8 w-full max-w-2xl mx-auto flex flex-col items-center">
+                    <div class="w-full">${headerHtml}</div>
+                    <div class="flex-1 w-full flex justify-center py-4">${mainHtml}</div>
+                    ${historyHtml}
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+    </script>
+</body>
+</html>
